@@ -52,10 +52,10 @@ const SleepTwinWorkspaceDialog = React.memo(function SleepTwinWorkspaceDialog() 
     <Dialog open={isOpen} onOpenChange={handleOpenChange}>
       <DialogContent className="max-w-sm sm:max-w-sm" showCloseButton={false}>
         <DialogHeader>
-          <DialogTitle className="text-sm">
+          <DialogTitle>
             {translate('auto.components.sidebar.SleepTwinWorkspaceDialog.title', 'Sleep Workspace')}
           </DialogTitle>
-          <DialogDescription className="text-xs">
+          <DialogDescription>
             {translate(
               'auto.components.sidebar.SleepTwinWorkspaceDialog.alsoSleeps',
               'Also sleeps the copy on {{hosts}}',
