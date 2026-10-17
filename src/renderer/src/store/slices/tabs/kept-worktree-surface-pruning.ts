@@ -31,14 +31,15 @@ function pruneGroup(group: TabGroup, removedIds: ReadonlySet<string>): TabGroup 
   }
   const tabOrder = group.tabOrder.filter((id) => !removedIds.has(id))
   const recentTabIds = sanitizeRecentTabIds(group.recentTabIds, tabOrder)
+  // Why MRU first: closing the active tab lands on the previously active one, as closeUnifiedTab does.
+  const activeTabId =
+    group.activeTabId && removedIds.has(group.activeTabId)
+      ? (recentTabIds.at(-1) ?? tabOrder[0] ?? null)
+      : group.activeTabId
   return {
     ...group,
     tabOrder,
-    // Why MRU first: closing the active tab lands on the previously active one, as closeUnifiedTab does.
-    activeTabId:
-      group.activeTabId && removedIds.has(group.activeTabId)
-        ? (recentTabIds.at(-1) ?? tabOrder[0] ?? null)
-        : group.activeTabId,
+    activeTabId,
     ...(group.recentTabIds ? { recentTabIds } : {})
   }
 }
