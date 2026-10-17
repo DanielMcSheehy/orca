@@ -1,6 +1,8 @@
 import type { AppState } from '../../../types'
 import {
   LOCAL_EXECUTION_HOST_ID,
+  toRuntimeExecutionHostId,
+  toSshExecutionHostId,
   type ExecutionHostId
 } from '../../../../../../shared/execution-host'
 import { parseWorkspaceKey } from '../../../../../../shared/workspace-scope'
@@ -13,34 +15,56 @@ import {
   removedHostCanonicalizer
 } from '../../../repos/repo-removal-host-twin-attribution'
 import { twinSelectionPatch } from '../../../repos/repo-removal-host-twin-teardown'
-import { removeSurfacesFromWorktreeLayout } from '../../tabs/worktree-surface-layout-removal'
+import { removeWorktreeLayout } from '../../tabs/worktree-layout-lifecycle'
+import { buildActiveSurfacePatch } from '../../tabs/tabs-surface'
+import { worktreeHostMatchOptions, worktreeMatchesHost } from '../listing/worktree-host-ownership'
 import { removeWorktreeVisitEntriesForTargets } from '@/lib/worktree-visit-recency'
 import { collectSurfacePurgeDoomedIds } from './worktree-purge-doomed-ids'
 import { createWorktreePurgeOmitters } from './worktree-purge-omitters'
 import { omitRecordKeys } from './record-key-omission'
+import { omitSleepingAgentSessionsForWorktrees } from './sleeping-agent-session-omission'
 import {
   cancelStructuredLaunchesForWorktrees,
   retirePurgedTabLaunches
 } from './purged-structured-launch-retirement'
 import { buildWorktreePurgeSurfacePatch } from './worktree-purge-surface-patch'
 
-/** Hosts that publish this workspace id, from repo worktree rows or folder workspace rows. */
-function getWorkspacePublisherHostIds(s: AppState, workspaceId: string): Set<ExecutionHostId> {
+/** Hosts outside the purge that still publish this workspace id, by the listing's host matching. */
+function getSurvivingPublisherHostIds(
+  s: AppState,
+  workspaceId: string,
+  purgedHosts: ReadonlySet<ExecutionHostId>
+): ExecutionHostId[] {
   const scope = parseWorkspaceKey(workspaceId)
   if (scope?.type === 'folder') {
-    return new Set(
-      (s.folderWorkspaces ?? [])
-        .filter((folder) => folder.id === scope.folderWorkspaceId)
-        .map((folder) => getFolderWorkspaceHostId(folder, s.projectGroups ?? []))
-    )
+    const hosts = (s.folderWorkspaces ?? [])
+      .filter((folder) => folder.id === scope.folderWorkspaceId)
+      .map((folder) => getFolderWorkspaceHostId(folder, s.projectGroups ?? []))
+    return [...new Set(hosts)].filter((hostId) => !purgedHosts.has(hostId))
   }
   const worktreeId = scope?.type === 'worktree' ? scope.worktreeId : workspaceId
   const repoId = getRepoIdFromWorktreeId(worktreeId)
-  return new Set(
-    [...(s.worktreesByRepo[repoId] ?? []), ...(s.detectedWorktreesByRepo[repoId]?.worktrees ?? [])]
-      .filter((row) => row.id === worktreeId)
-      .map((row) => row.hostId ?? LOCAL_EXECUTION_HOST_ID)
+  const matchOptions = new Map(
+    [...purgedHosts].map((hostId) => [hostId, worktreeHostMatchOptions(s, repoId, hostId)])
   )
+  // Why host matching: an unstamped legacy row or a paired runtime's SSH row is the purged copy.
+  const survivors = [
+    ...(s.worktreesByRepo[repoId] ?? []),
+    ...(s.detectedWorktreesByRepo[repoId]?.worktrees ?? [])
+  ]
+    .filter(
+      (row) =>
+        row.id === worktreeId &&
+        ![...matchOptions].some(([hostId, options]) => worktreeMatchesHost(row, hostId, options))
+    )
+    .map(
+      (row) =>
+        row.hostId ??
+        (row.runtimeOwnerEnvironmentId
+          ? toRuntimeExecutionHostId(row.runtimeOwnerEnvironmentId)
+          : LOCAL_EXECUTION_HOST_ID)
+    )
+  return [...new Set(survivors)].filter((hostId) => !purgedHosts.has(hostId))
 }
 
 /**
@@ -60,9 +84,7 @@ export function collectHostTwinPurgeScopes(
   }
   const scopes = new Map<ExecutionHostId, Map<string, ExecutionHostId[]>>()
   for (const [id, purgedHosts] of purgedHostsById) {
-    const survivors = [...getWorkspacePublisherHostIds(s, id)].filter(
-      (hostId) => !purgedHosts.has(hostId)
-    )
+    const survivors = getSurvivingPublisherHostIds(s, id, purgedHosts)
     if (survivors.length === 0) {
       continue
     }
@@ -117,22 +139,53 @@ export function buildHostTwinPurgeState(
     fileIds: removed.fileIds
   })
   const omitters = createWorktreePurgeOmitters(s, new Set(), doomed)
-  const deleteStateKeys = [...twinIds].map((id) => composeWorktreeHostIdentity(hostId, id))
-  return {
-    ...removeSurfacesFromWorktreeLayout(s, twinIds, {
+  const tabPrefixedSleeping = {
+    sleepingAgentSessionsByPaneKey: omitters.omitByPaneKeyTabPrefix(
+      s.sleepingAgentSessionsByPaneKey
+    ),
+    agentLaunchConfigByPaneKey: omitters.omitByPaneKeyTabPrefix(s.agentLaunchConfigByPaneKey)
+  }
+  // Why SSH only: a record whose tab is gone names its host just by connection; null is ambiguous.
+  const sshRecordPaneKeys = Object.entries(s.sleepingAgentSessionsByPaneKey ?? {}).flatMap(
+    ([paneKey, record]) =>
+      twinIds.has(record.worktreeId) &&
+      record.connectionId &&
+      canonical(record.worktreeId)(toSshExecutionHostId(record.connectionId)) === hostId
+        ? [paneKey]
+        : []
+  )
+  const layout = removeWorktreeLayout(s, {
+    worktreeIds: new Set(),
+    tabIds: doomed.doomedTabIds,
+    activeFileCleared: s.activeFileId != null && removed.fileIds.has(s.activeFileId),
+    kept: {
+      worktreeIds: twinIds,
       terminalTabIds: removed.terminalTabIds,
       fileIds: removed.fileIds,
       browserTabIds: removed.browserTabIds,
       unifiedTabIds: removed.otherTabIds
-    }),
-    // Why tab-prefixed only: a sleeping record matched by worktree id alone may be the twin's.
+    }
+  })
+  const removedAny = [
+    removed.terminalTabIds,
+    removed.fileIds,
+    removed.browserTabIds,
+    removed.otherTabIds
+  ].some((ids) => ids.size > 0)
+  const activeTwinId =
+    removedAny && s.activeWorktreeId && twinIds.has(s.activeWorktreeId) ? s.activeWorktreeId : null
+  return {
+    ...layout,
+    // Why: a group may now show a surviving tab of another kind, so selection is derived again.
+    ...(activeTwinId ? buildActiveSurfacePatch({ ...s, ...layout }, activeTwinId) : {}),
     ...buildWorktreePurgeSurfacePatch(s, omitters, doomed.doomedTabIds, {
-      sleepingAgentSessionsByPaneKey: omitters.omitByPaneKeyTabPrefix(
-        s.sleepingAgentSessionsByPaneKey
-      ),
-      agentLaunchConfigByPaneKey: omitters.omitByPaneKeyTabPrefix(s.agentLaunchConfigByPaneKey)
+      ...tabPrefixedSleeping,
+      ...omitSleepingAgentSessionsForWorktrees(tabPrefixedSleeping, new Set(), sshRecordPaneKeys)
     }),
-    deleteStateByWorktreeId: omitRecordKeys(s.deleteStateByWorktreeId, deleteStateKeys),
+    deleteStateByWorktreeId: omitRecordKeys(
+      s.deleteStateByWorktreeId,
+      [...twinIds].map((id) => composeWorktreeHostIdentity(hostId, id))
+    ),
     lastVisitedAtByWorktreeId: removeWorktreeVisitEntriesForTargets(
       s.lastVisitedAtByWorktreeId,
       [...twinIds].map((id) => ({ id, hostId }))
