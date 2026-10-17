@@ -41,6 +41,8 @@ const { getFileExplorerOperationOwnerFromState } =
 const { writeWorkspaceFileDragSourceForWorkspace } =
   await import('@/lib/workspace-file-drag-source')
 const { readWorkspaceFileDragSource } = await import('@/lib/workspace-file-drag')
+const { resolveNativeChatSkillDiscoveryContext, selectNativeChatSkillStateInputs } =
+  await import('@/components/native-chat/native-chat-skill-discovery-context')
 const { mirroredRuntimeEnvironmentIdForWorkspace } =
   await import('@/runtime/web-session-tabs-sync/mirrored-workspace-owner')
 
@@ -118,6 +120,38 @@ describe.each<HostTwinKind>(['local+runtime', 'local+ssh'])('%s twin', (kind) =>
   it('names no source host for a file drag', () => {
     const { workspaceKey } = bind(createHostTwinFixture(kind))
     expect(dragSource(workspaceKey)).toBeNull()
+  })
+})
+
+describe('chat skill discovery', () => {
+  function skillContext(
+    fixture: HostTwinFixture
+  ): ReturnType<typeof resolveNativeChatSkillDiscoveryContext> {
+    const { store, workspaceKey, local } = fixture
+    store.setState({
+      tabsByWorktree: {
+        [workspaceKey]: [
+          { ...store.getState().tabsByWorktree[workspaceKey][0], startupCwd: '/work/twin' }
+        ]
+      }
+    })
+    return resolveNativeChatSkillDiscoveryContext(
+      selectNativeChatSkillStateInputs(store.getState()),
+      local.terminalTabId
+    )
+  }
+
+  it('waits for a host pick on a twin', () => {
+    expect(skillContext(bind(createHostTwinFixture('local+runtime')))).toBeNull()
+  })
+
+  it('scans the copy the user picked', () => {
+    const fixture = bind(createHostTwinFixture('local+runtime'))
+    fixture.store.setState({
+      activeWorktreeId: fixture.workspaceKey,
+      activeWorkspaceExecutionHostId: 'local'
+    })
+    expect(skillContext(fixture)).toMatchObject({ runtimeTarget: { kind: 'local' } })
   })
 })
 

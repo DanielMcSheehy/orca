@@ -14,7 +14,9 @@ import {
 export type NativeChatSkillStateInputs = Pick<
   AppState,
   | 'activeRepoId'
+  | 'activeWorkspaceExecutionHostId'
   | 'activeWorktreeId'
+  | 'detectedWorktreesByRepo'
   | 'floatingWorkspacePath'
   | 'folderWorkspaces'
   | 'projectGroups'
@@ -45,7 +47,10 @@ export type NativeChatSkillDiscoveryContext = {
 export function selectNativeChatSkillStateInputs(state: AppState): NativeChatSkillStateInputs {
   return {
     activeRepoId: state.activeRepoId,
+    // Why: the owner resolver needs the picked host and detected rows to tell twins apart.
+    activeWorkspaceExecutionHostId: state.activeWorkspaceExecutionHostId,
     activeWorktreeId: state.activeWorktreeId,
+    detectedWorktreesByRepo: state.detectedWorktreesByRepo,
     floatingWorkspacePath: state.floatingWorkspacePath,
     folderWorkspaces: state.folderWorkspaces,
     projectGroups: state.projectGroups,
