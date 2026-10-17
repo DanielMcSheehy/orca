@@ -2,18 +2,14 @@ import process from 'node:process'
 import { pathToFileURL } from 'node:url'
 import { readTrackedSources, runEntryRatchet } from './ratchet-baseline.mjs'
 
-// Ratchet on renderer files that import the deprecated runtime-owner resolvers. They read a
+// Ratchet on renderer files that import the deprecated runtime-owner resolvers. Both read a
 // worktree that two hosts publish as "not a runtime", which callers then treat as local, so a stop,
 // sleep or kill can land on the wrong machine. New code resolves the owner with its host and
 // ambiguity kept; the importer list may only shrink.
 
 const BASELINE_PATH = 'config/deprecated-runtime-owner-importers-baseline.txt'
 const SCAN_ROOT = 'src/renderer/src'
-const DEPRECATED_NAMES = [
-  'getRuntimeEnvironmentIdForWorktree',
-  'resolveRuntimeOwnerForWorktree',
-  'getExplicitRuntimeEnvironmentIdForWorktree'
-]
+const DEPRECATED_NAMES = ['getRuntimeEnvironmentIdForWorktree', 'resolveRuntimeOwnerForWorktree']
 // The defining module and its own tests are not importers.
 const DEFINING_FILE = 'src/renderer/src/lib/worktree-runtime-owner.ts'
 
@@ -52,16 +48,14 @@ const RATCHET = {
   name: 'deprecated-runtime-owner',
   baselinePath: BASELINE_PATH,
   header: [
-    '# Renderer files that import getRuntimeEnvironmentIdForWorktree / resolveRuntimeOwnerForWorktree /',
-    '# getExplicitRuntimeEnvironmentIdForWorktree.',
-    '# This is a RATCHET: the list may only SHRINK. These resolvers read an ambiguous (two-host)',
+    '# Renderer files that import getRuntimeEnvironmentIdForWorktree / resolveRuntimeOwnerForWorktree.',
+    '# This is a RATCHET: the list may only SHRINK. Both resolvers read an ambiguous (two-host)',
     '# worktree as "not a runtime", which callers treat as local.',
     '# Prune after migrating a file: pnpm check:deprecated-runtime-owner-ratchet --prune'
   ],
   collect: collectDeprecatedRuntimeOwnerImporters,
   fix: [
-    'getRuntimeEnvironmentIdForWorktree / resolveRuntimeOwnerForWorktree /',
-    'getExplicitRuntimeEnvironmentIdForWorktree collapse an owner that two',
+    'getRuntimeEnvironmentIdForWorktree / resolveRuntimeOwnerForWorktree collapse an owner that two',
     'hosts publish into "local". Resolve the owner with its host kept and refuse on ambiguity',
     'instead (see src/renderer/src/lib/resolve-owner.ts).'
   ]

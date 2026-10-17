@@ -1,6 +1,5 @@
-# Renderer files that import getRuntimeEnvironmentIdForWorktree / resolveRuntimeOwnerForWorktree /
-# getExplicitRuntimeEnvironmentIdForWorktree.
-# This is a RATCHET: the list may only SHRINK. These resolvers read an ambiguous (two-host)
+# Renderer files that import getRuntimeEnvironmentIdForWorktree / resolveRuntimeOwnerForWorktree.
+# This is a RATCHET: the list may only SHRINK. Both resolvers read an ambiguous (two-host)
 # worktree as "not a runtime", which callers treat as local.
 # Prune after migrating a file: pnpm check:deprecated-runtime-owner-ratchet --prune
 src/renderer/src/components/browser-pane/assemble-chrome/browser-workspace-pane.tsx
