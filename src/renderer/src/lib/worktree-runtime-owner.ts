@@ -151,6 +151,10 @@ export function resolveRuntimeOwnerForWorktree(
     : NON_RUNTIME_OWNER
 }
 
+/**
+ * @deprecated Use `runtimeEnvironmentIdForWorkspaceOwner` / `resolveOwner` (`./resolve-owner`).
+ * This reads a twin, local, SSH and unknown alike as `null`, which callers treat as local.
+ */
 export function getExplicitRuntimeEnvironmentIdForWorktree(
   state: WorktreeRuntimeOwnerState,
   worktreeId: string | null | undefined

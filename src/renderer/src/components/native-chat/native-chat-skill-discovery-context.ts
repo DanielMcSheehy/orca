@@ -2,10 +2,8 @@ import type { AppState } from '../../store/types'
 import type { SkillDiscoveryTarget } from '../../../../shared/skills'
 import { parseExecutionHostId } from '../../../../shared/execution-host'
 import type { RuntimeClientTarget } from '../../../../shared/runtime-client-target'
-import {
-  getExplicitRuntimeEnvironmentIdForWorktree,
-  getExecutionHostIdForWorktree
-} from '@/lib/worktree-runtime-owner'
+import { getExecutionHostIdForWorktree } from '@/lib/worktree-runtime-owner'
+import { runtimeEnvironmentIdForWorkspaceOwner } from '@/lib/resolve-owner'
 import { getLocalProjectExecutionRuntimeContext } from '@/lib/local-preflight-context'
 import {
   resolveNativeChatTabDirectory,
@@ -119,7 +117,12 @@ export function resolveNativeChatSkillDiscoveryContext(
     }
   }
 
-  const runtimeEnvironmentId = getExplicitRuntimeEnvironmentIdForWorktree(state, worktreeId)
+  const owner = runtimeEnvironmentIdForWorkspaceOwner(state, { workspaceId: worktreeId })
+  // Why: listing one twin's skills under the other's chat would offer skills that host lacks.
+  if (owner.kind === 'ambiguous') {
+    return null
+  }
+  const runtimeEnvironmentId = owner.environmentId
   // Why: a selected global runtime is not proof that it owns this pane. Modern
   // panes carry an owner stamp; ambiguous legacy panes stay not-ready.
   if (parsedHost?.kind === 'runtime' && !runtimeEnvironmentId) {

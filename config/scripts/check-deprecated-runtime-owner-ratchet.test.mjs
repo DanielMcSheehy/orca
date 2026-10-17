@@ -6,7 +6,7 @@ import {
 } from './check-deprecated-runtime-owner-ratchet.mjs'
 
 describe('importsDeprecatedRuntimeOwner', () => {
-  it('finds a named import of either deprecated resolver', () => {
+  it('finds a named import of any deprecated resolver', () => {
     expect(
       importsDeprecatedRuntimeOwner(
         "import { getRuntimeEnvironmentIdForWorktree } from '@/lib/worktree-runtime-owner'\n"
@@ -15,6 +15,11 @@ describe('importsDeprecatedRuntimeOwner', () => {
     expect(
       importsDeprecatedRuntimeOwner(
         "import {\n  foo,\n  resolveRuntimeOwnerForWorktree\n} from './worktree-runtime-owner'\n"
+      )
+    ).toBe(true)
+    expect(
+      importsDeprecatedRuntimeOwner(
+        "import { getExplicitRuntimeEnvironmentIdForWorktree } from '@/lib/worktree-runtime-owner'\n"
       )
     ).toBe(true)
   })
