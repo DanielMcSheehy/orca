@@ -145,4 +145,46 @@ describe('purgeWorktreeTerminalState with a surviving twin', () => {
     expect(s.openFiles).toEqual([])
     expect(s.lastVisitedAtByWorktreeId).toEqual({})
   })
+
+  it("drops a tabless sleeping record that names the purged SSH host, not the twin's", () => {
+    const f = twin()
+    const key = f.workspaceKey
+    const record = f.store.getState().sleepingAgentSessionsByPaneKey[f.remote.paneKey]
+    f.store.setState((s) => ({
+      sleepingAgentSessionsByPaneKey: {
+        ...s.sleepingAgentSessionsByPaneKey,
+        'gone-ssh:leaf': { ...record, paneKey: 'gone-ssh:leaf' },
+        'gone-local:leaf': { ...record, paneKey: 'gone-local:leaf', connectionId: null }
+      }
+    }))
+
+    f.store.getState().purgeWorktreeTerminalState([hostWorktreeTarget({ id: key, ...f.remote })])
+
+    expect(Object.keys(f.store.getState().sleepingAgentSessionsByPaneKey).sort()).toEqual(
+      ['gone-local:leaf', f.local.paneKey].sort()
+    )
+  })
+
+  it('selects a surviving tab when the purged terminal was active', () => {
+    const f = twin()
+    const key = f.workspaceKey
+    f.store.setState((s) => ({
+      activeTabId: f.remote.terminalTabId,
+      activeTabType: 'terminal',
+      groupsByWorktree: {
+        [key]: (s.groupsByWorktree[key] ?? []).map((group) => ({
+          ...group,
+          activeTabId: f.remote.terminalTabId,
+          recentTabIds: [f.local.fileId, f.remote.terminalTabId]
+        }))
+      }
+    }))
+
+    f.store.getState().purgeWorktreeTerminalState([hostWorktreeTarget({ id: key, ...f.remote })])
+
+    const s = f.store.getState()
+    expect(s.groupsByWorktree[key]?.[0]?.activeTabId).toBe(f.local.fileId)
+    expect(s.activeTabType).toBe('editor')
+    expect(s.activeFileId).toBe(f.local.fileId)
+  })
 })
