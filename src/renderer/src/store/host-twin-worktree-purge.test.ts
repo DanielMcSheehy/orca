@@ -195,6 +195,7 @@ describe('purgeWorktreeTerminalState with a surviving twin', () => {
   it("attributes a paired runtime's purge to the SSH copy it reaches", () => {
     const f = twin()
     const key = f.workspaceKey
+    const runtimeHostId = `runtime:${TWIN_RUNTIME_ENV}` as const
     f.store.setState((s) => ({
       worktreesByRepo: {
         [f.projectId]: (s.worktreesByRepo[f.projectId] ?? []).map((row) =>
@@ -202,20 +203,45 @@ describe('purgeWorktreeTerminalState with a surviving twin', () => {
             ? { ...row, runtimeOwnerEnvironmentId: TWIN_RUNTIME_ENV }
             : row
         )
+      },
+      lastVisitedAtByWorktreeId: {
+        ...s.lastVisitedAtByWorktreeId,
+        [getWorktreeVisitKey(key, runtimeHostId)]: 3
       }
     }))
 
     f.store
       .getState()
-      .purgeWorktreeTerminalState([
-        hostWorktreeTarget({ id: key, hostId: `runtime:${TWIN_RUNTIME_ENV}` })
-      ])
+      .purgeWorktreeTerminalState([hostWorktreeTarget({ id: key, hostId: runtimeHostId })])
 
-    expect(f.store.getState().tabsByWorktree[key]?.map((tab) => tab.id)).toEqual([
+    const s = f.store.getState()
+    expect(s.tabsByWorktree[key]?.map((tab) => tab.id)).toEqual([
       f.local.terminalTabId,
       f.dormantTabId
     ])
-    expect(f.store.getState().openFiles.map((file) => file.id)).toEqual([f.local.fileId])
+    expect(s.openFiles.map((file) => file.id)).toEqual([f.local.fileId])
+    // Recency written under either identity of the purged copy goes; the twin's stays.
+    expect(Object.keys(s.lastVisitedAtByWorktreeId)).toEqual([
+      getWorktreeVisitKey(key, f.local.hostId)
+    ])
+  })
+
+  it('keeps an untouched legacy selection when another host is purged', () => {
+    const f = twin()
+    const key = f.workspaceKey
+    f.store.setState({
+      activeWorkspaceExecutionHostId: f.local.hostId,
+      activeTabId: f.local.terminalTabId,
+      activeTabType: 'terminal',
+      activeFileIdByWorktree: { [key]: f.local.fileId },
+      // A legacy workspace: no tab groups, so derivation prefers a remembered editor.
+      groupsByWorktree: {}
+    })
+
+    f.store.getState().purgeWorktreeTerminalState([hostWorktreeTarget({ id: key, ...f.remote })])
+
+    expect(f.store.getState().activeTabId).toBe(f.local.terminalTabId)
+    expect(f.store.getState().activeTabType).toBe('terminal')
   })
 
   it.each([

@@ -8,6 +8,7 @@ import { collectWorktreePurgeDoomedIds } from './worktree-purge-doomed-ids'
 import { createWorktreePurgeOmitters } from './worktree-purge-omitters'
 import { omitSleepingAgentSessionsForWorktrees } from './sleeping-agent-session-omission'
 import { removeDeleteStatesForWorktreeIds } from './worktree-delete-state'
+import { omitRecordKeys } from './record-key-omission'
 import { removeWorktreeVisitEntriesForTargets } from '@/lib/worktree-visit-recency'
 import { forgetAmbiguousOwnerWarnings } from '../listing/worktree-owner-settings'
 import { forgetWorktreeSleepIntent } from '@/lib/worktree-sleep-intent'
@@ -43,7 +44,25 @@ export function buildWorktreePurgeState(
   for (const [hostId, twinHostIds] of twinScopes.byHost) {
     patch = { ...patch, ...buildHostTwinPurgeState({ ...s, ...patch }, hostId, twinHostIds) }
   }
-  return patch
+  // Why both hosts: a paired runtime's copy writes recency and delete state under either identity.
+  const hostKeys = [
+    ...targets.filter((target) => !fullTargets.includes(target)),
+    ...[...twinScopes.byHost].flatMap(([hostId, twins]) =>
+      [...twins.keys()].map((id) => ({ id, hostId }))
+    )
+  ].flatMap((target) => (target.hostId ? [{ id: target.id, hostId: target.hostId }] : []))
+  const next = { ...s, ...patch }
+  return {
+    ...patch,
+    lastVisitedAtByWorktreeId: removeWorktreeVisitEntriesForTargets(
+      next.lastVisitedAtByWorktreeId,
+      hostKeys
+    ),
+    deleteStateByWorktreeId: omitRecordKeys(
+      next.deleteStateByWorktreeId,
+      hostKeys.map((target) => composeWorktreeHostIdentity(target.hostId, target.id))
+    )
+  }
 }
 
 /** Drops every bucket under the targets' ids; visit recency alone stays host-scoped. */

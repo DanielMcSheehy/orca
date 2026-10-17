@@ -21,10 +21,8 @@ import { twinSelectionPatch } from '../../../repos/repo-removal-host-twin-teardo
 import { removeWorktreeLayout } from '../../tabs/worktree-layout-lifecycle'
 import { buildActiveSurfacePatch } from '../../tabs/tabs-surface'
 import { worktreeHostMatchOptions, worktreeMatchesHost } from '../listing/worktree-host-ownership'
-import { removeWorktreeVisitEntriesForTargets } from '@/lib/worktree-visit-recency'
 import { collectSurfacePurgeDoomedIds } from './worktree-purge-doomed-ids'
 import { createWorktreePurgeOmitters } from './worktree-purge-omitters'
-import { omitRecordKeys } from './record-key-omission'
 import { omitSleepingAgentSessionsForWorktrees } from './sleeping-agent-session-omission'
 import {
   cancelStructuredLaunchesForWorktrees,
@@ -208,30 +206,24 @@ export function buildHostTwinPurgeState(
       unifiedTabIds: removed.otherTabIds
     }
   })
-  const removedAny = [
-    removed.terminalTabIds,
-    removed.fileIds,
-    removed.browserTabIds,
-    removed.otherTabIds
-  ].some((ids) => ids.size > 0)
-  const activeTwinId =
-    removedAny && s.activeWorktreeId && twinIds.has(s.activeWorktreeId) ? s.activeWorktreeId : null
+  const active = s.activeWorktreeId && twinIds.has(s.activeWorktreeId) ? s.activeWorktreeId : null
+  // Why only then: re-deriving an untouched selection could switch the visible surface.
+  const selectionRemoved =
+    active !== null &&
+    ((s.activeTabId != null && removed.terminalTabIds.has(s.activeTabId)) ||
+      (s.activeFileId != null && removed.fileIds.has(s.activeFileId)) ||
+      (s.activeBrowserTabId != null && removed.browserTabIds.has(s.activeBrowserTabId)) ||
+      (layout.groupsByWorktree[active] ?? []).some(
+        (group, index) => group.activeTabId !== s.groupsByWorktree[active]?.[index]?.activeTabId
+      ))
   return {
     ...layout,
     // Why: a group may now show a surviving tab of another kind, so selection is derived again.
-    ...(activeTwinId ? buildActiveSurfacePatch({ ...s, ...layout }, activeTwinId) : {}),
+    ...(selectionRemoved ? buildActiveSurfacePatch({ ...s, ...layout }, active) : {}),
     ...buildWorktreePurgeSurfacePatch(s, omitters, doomed.doomedTabIds, {
       ...tabPrefixedSleeping,
       ...omitSleepingAgentSessionsForWorktrees(tabPrefixedSleeping, new Set(), sshRecordPaneKeys)
     }),
-    deleteStateByWorktreeId: omitRecordKeys(
-      s.deleteStateByWorktreeId,
-      [...twinIds].map((id) => composeWorktreeHostIdentity(hostId, id))
-    ),
-    lastVisitedAtByWorktreeId: removeWorktreeVisitEntriesForTargets(
-      s.lastVisitedAtByWorktreeId,
-      [...twinIds].map((id) => ({ id, hostId }))
-    ),
     ...twinSelectionPatch(s, twinHostIds, hostId)
   }
 }
