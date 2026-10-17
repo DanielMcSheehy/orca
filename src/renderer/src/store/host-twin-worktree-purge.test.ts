@@ -217,4 +217,27 @@ describe('purgeWorktreeTerminalState with a surviving twin', () => {
     ])
     expect(f.store.getState().openFiles.map((file) => file.id)).toEqual([f.local.fileId])
   })
+
+  it.each([
+    ['drops', 'remote-source.md', 'local-source.md', false],
+    ['keeps', 'shared-source.md', 'shared-source.md', true]
+  ] as const)(
+    "%s a purged preview's source state by whether a surviving file still uses it",
+    (_verb, remoteSource, localSource, kept) => {
+      const f = twin()
+      const key = f.workspaceKey
+      f.store.setState((s) => ({
+        openFiles: s.openFiles.map((file) => ({
+          ...file,
+          markdownPreviewSourceFileId: file.id === f.remote.fileId ? remoteSource : localSource
+        })),
+        editorDrafts: { ...s.editorDrafts, [remoteSource]: 'source draft' }
+      }))
+
+      f.store.getState().purgeWorktreeTerminalState([hostWorktreeTarget({ id: key, ...f.remote })])
+
+      expect(remoteSource in f.store.getState().editorDrafts).toBe(kept)
+      expect(f.store.getState().editorDrafts[f.local.fileId]).toBeDefined()
+    }
+  )
 })

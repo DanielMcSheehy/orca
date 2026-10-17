@@ -162,10 +162,23 @@ export function buildHostTwinPurgeState(
       terminalTabs.push({ id: tabId, ptyId: null })
     }
   }
+  // Why: a preview keys its source's editor state, unless a surviving file still uses that source.
+  const survivingFiles = s.openFiles.filter((file) => !removed.fileIds.has(file.id))
+  const previewSourceIds = s.openFiles.flatMap((file) =>
+    removed.fileIds.has(file.id) &&
+    file.markdownPreviewSourceFileId &&
+    !survivingFiles.some(
+      (other) =>
+        other.id === file.markdownPreviewSourceFileId ||
+        other.markdownPreviewSourceFileId === file.markdownPreviewSourceFileId
+    )
+      ? [file.markdownPreviewSourceFileId]
+      : []
+  )
   const doomed = collectSurfacePurgeDoomedIds(s, {
     tabs: terminalTabs,
     browserWorkspaceIds: removed.browserTabIds,
-    fileIds: removed.fileIds
+    fileIds: [...removed.fileIds, ...previewSourceIds]
   })
   const omitters = createWorktreePurgeOmitters(s, new Set(), doomed)
   const tabPrefixedSleeping = {
