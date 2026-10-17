@@ -48,7 +48,14 @@ function toOwnerMatch(
   if (authority === 'contradictory') {
     return { kind: 'ambiguous' }
   }
-  return authority ? { kind: 'resolved', owner: authority } : { kind: 'missing' }
+  if (authority) {
+    return { kind: 'resolved', owner: authority }
+  }
+  // Why: a route that names a host (e.g. the unresolved-owner sentinel) is contested, not absent;
+  // `missing` would let callers read it as this app.
+  return resolution.route.executionHostId || resolution.route.runtimeEnvironmentId?.trim()
+    ? { kind: 'ambiguous' }
+    : { kind: 'missing' }
 }
 
 /**

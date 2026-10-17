@@ -3,7 +3,7 @@
  * now refuse it; one host's row still routes to that host.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { ExecutionHostId } from '../../../shared/execution-host'
+import { UNRESOLVED_OWNER_HOST_ID, type ExecutionHostId } from '../../../shared/execution-host'
 import { folderWorkspaceKey } from '../../../shared/workspace-scope'
 import {
   createHostTwinFixture,
@@ -177,6 +177,19 @@ describe('folder workspace twin', () => {
       })
     }
   )
+})
+
+describe('a workspace selected on the unresolved-owner sentinel', () => {
+  it('neither reopens a terminal locally nor uploads an attachment', () => {
+    const { store, workspaceKey } = runtimeOnly()
+    store.setState({
+      activeWorktreeId: workspaceKey,
+      activeWorkspaceExecutionHostId: UNRESOLVED_OWNER_HOST_ID,
+      recentlyClosedTerminalTabsByWorktree: { [workspaceKey]: [{}] }
+    })
+    expect(store.getState().reopenClosedTerminalTab(workspaceKey)).toBe(false)
+    expect(resolveNativeChatAttachmentHost(store.getState(), workspaceKey)).toBeNull()
+  })
 })
 
 describe('only this app owns the workspace', () => {

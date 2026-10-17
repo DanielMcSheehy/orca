@@ -166,10 +166,8 @@ export function useWorktreeCardFoundation({
     if (!repo?.connectionId) {
       return null
     }
-    const owner = runtimeEnvironmentIdForWorkspaceOwner(s, {
-      workspaceId: worktree.id,
-      hostId: worktree.hostId
-    })
+    // Why no hostId: the host-qualified lookup scans every row, and this runs per card per write.
+    const owner = runtimeEnvironmentIdForWorkspaceOwner(s, { workspaceId: worktree.id })
     // Why: the chip only reads status, so an undecidable owner falls back to the direct SSH state.
     return owner.kind === 'resolved' ? owner.environmentId : null
   })
