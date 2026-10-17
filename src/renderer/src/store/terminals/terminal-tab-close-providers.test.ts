@@ -55,4 +55,28 @@ describe('provider retirement of a legacy runtime terminal', () => {
     // The legacy id names neither copy's server, so neither is asked to close it.
     expect(callRuntimeRpc).not.toHaveBeenCalled()
   })
+
+  it('skips the close while the workspace row has not loaded', () => {
+    const store = createTestStore()
+
+    startTerminalTabProviderRetirement({
+      localPtyTeardownOwnedExternally: true,
+      remoteCloseOwnedByHost: false,
+      retirementPlan: {
+        tabId: 'tab-1',
+        worktreeId: 'repo-unloaded::/work/wt',
+        ptyIds: ['remote:handle-1'],
+        localOrSshPtyIds: [],
+        runtimeTerminals: [{ ptyId: 'remote:handle-1', handle: 'handle-1', environmentId: null }],
+        cleanupOnlyPtyIds: [],
+        sharedPtyIds: [],
+        unroutablePtyIds: []
+      },
+      state: store.getState(),
+      tabId: 'tab-1'
+    })
+
+    // No row proves which host holds the handle, so no host is asked to close it.
+    expect(callRuntimeRpc).not.toHaveBeenCalled()
+  })
 })
