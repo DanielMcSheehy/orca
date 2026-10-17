@@ -23,6 +23,7 @@ import { removeWorktreeLayout } from '../../tabs/worktree-layout-lifecycle'
 import { buildActiveSurfacePatch } from '../../tabs/tabs-surface'
 import { worktreeHostMatchOptions, worktreeMatchesHost } from '../listing/worktree-host-ownership'
 import { collectSurfacePurgeDoomedIds } from './worktree-purge-doomed-ids'
+import { collectPtyIdsForTab } from '../../terminal-tab-retirement'
 import { createWorktreePurgeOmitters } from './worktree-purge-omitters'
 import { omitSleepingAgentSessionsForWorktrees } from './sleeping-agent-session-omission'
 import {
@@ -188,6 +189,16 @@ export function buildHostTwinPurgeState(
     browserWorkspaceIds: removed.browserTabIds,
     fileIds: [...removed.fileIds, ...previewSourceIds]
   })
+  // Why: a PTY a kept tab still binds stays live, so its PTY-keyed state must stay with it.
+  for (const worktreeId of twinIds) {
+    for (const tab of s.tabsByWorktree[worktreeId] ?? []) {
+      if (!doomed.doomedTabIds.has(tab.id)) {
+        for (const ptyId of collectPtyIdsForTab(s, tab.id, tab.ptyId)) {
+          doomed.doomedPtyIds.delete(ptyId)
+        }
+      }
+    }
+  }
   const omitters = createWorktreePurgeOmitters(s, new Set(), doomed)
   const tabPrefixedSleeping = {
     sleepingAgentSessionsByPaneKey: omitters.omitByPaneKeyTabPrefix(

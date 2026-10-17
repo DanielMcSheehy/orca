@@ -91,6 +91,26 @@ describe('purgeWorktreeTerminalState with a surviving twin', () => {
     expect(s.activeWorkspaceExecutionHostId).toBe(f.local.hostId)
   })
 
+  it('keeps PTY-keyed state for a purged PTY that a kept tab still binds', () => {
+    const f = twin()
+    const shared = f.remote.ptyId
+    // A mixed-host split: the kept local tab also binds the purged copy's PTY.
+    f.store.setState((s) => ({
+      ptyIdsByTabId: { ...s.ptyIdsByTabId, [f.local.terminalTabId]: [f.local.ptyId, shared] },
+      suppressedPtyExitIds: { [shared]: true },
+      pendingCodexPaneRestartIds: { [shared]: true }
+    }))
+
+    f.store
+      .getState()
+      .purgeWorktreeTerminalState([hostWorktreeTarget({ id: f.workspaceKey, ...f.remote })])
+
+    const s = f.store.getState()
+    expect(s.ptyIdsByTabId[f.local.terminalTabId]).toEqual([f.local.ptyId, shared])
+    expect(s.suppressedPtyExitIds).toEqual({ [shared]: true })
+    expect(s.pendingCodexPaneRestartIds).toEqual({ [shared]: true })
+  })
+
   it('keeps the runtime twin when the local copy is purged', () => {
     const f = twin('local+runtime')
     const key = f.workspaceKey
