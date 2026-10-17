@@ -13,6 +13,7 @@ import {
 } from '../../../../../../shared/worktree/host-qualified-identity'
 import type { WorktreePurgeTarget } from '../../worktree-purge-target'
 import { getFolderWorkspaceHostId } from '../../../folder-workspaces/folder-workspace-catalog'
+import { getProjectGroupHostId } from '../../project-group-owner-routing'
 import {
   collectRemovedHostTwinState,
   removedHostCanonicalizer
@@ -49,9 +50,18 @@ function resolvePurgedPublishers(
   const scope = parseWorkspaceKey(workspaceId)
   const attributedHostIds = new Map([...purgedHosts].map((hostId) => [hostId, hostId]))
   if (scope?.type === 'folder') {
+    const groups = s.projectGroups ?? []
     const hosts = (s.folderWorkspaces ?? [])
       .filter((folder) => folder.id === scope.folderWorkspaceId)
-      .map((folder) => getFolderWorkspaceHostId(folder, s.projectGroups ?? []))
+      .flatMap((folder) => {
+        const groupHosts = groups
+          .filter((group) => group.id === folder.projectGroupId)
+          .map(getProjectGroupHostId)
+        // Why every group host: an unstamped folder under a group two hosts publish may be either's.
+        return folder.executionHostId || folder.connectionId || groupHosts.length === 0
+          ? [getFolderWorkspaceHostId(folder, groups)]
+          : groupHosts
+      })
     return {
       survivors: [...new Set(hosts)].filter((hostId) => !purgedHosts.has(hostId)),
       attributedHostIds
