@@ -4,7 +4,7 @@ import {
 } from '@/runtime/runtime-environment-revision'
 import type { AppState } from '../types'
 import { callRuntimeRpc, ensureRuntimeEnvironmentCompatible } from '@/runtime/runtime-rpc-client'
-import { resolveTerminalWorktreeRoute } from '@/lib/terminal-worktree-route'
+import { runtimeEnvironmentIdForWorkspaceOwner } from '@/lib/resolve-owner'
 import {
   classifyTerminalRetirementWorktree,
   type TerminalTabRetirementPlan
@@ -25,9 +25,17 @@ export function startTerminalTabProviderRetirement({
   tabId: string
   canRetireRuntimeTerminal?: () => boolean
 }): void {
-  const fallbackWorktreeRoute = retirementPlan.worktreeId
-    ? resolveTerminalWorktreeRoute(state, retirementPlan.worktreeId)
-    : { runtimeEnvironmentId: null }
+  // Why the owner resolver: a legacy remote id names no runtime, so its row decides, focus-free and
+  // the same way its retirement identity does; an ambiguous owner skips the close.
+  const fallbackOwner = retirementPlan.worktreeId
+    ? runtimeEnvironmentIdForWorkspaceOwner(state, { workspaceId: retirementPlan.worktreeId })
+    : null
+  const fallbackWorktreeRoute =
+    fallbackOwner === null
+      ? { runtimeEnvironmentId: null }
+      : fallbackOwner.kind === 'ambiguous'
+        ? null
+        : { runtimeEnvironmentId: fallbackOwner.environmentId }
   const retirementTasks: Promise<unknown>[] = localPtyTeardownOwnedExternally
     ? []
     : retirementPlan.localOrSshPtyIds.map(async (ptyId) => window.api.pty.kill(ptyId))
