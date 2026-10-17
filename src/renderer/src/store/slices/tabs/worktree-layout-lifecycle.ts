@@ -3,6 +3,7 @@ import type { BrowserWorkspace } from '../../../../../shared/browser-workspace-t
 import type { TerminalTab } from '../../../../../shared/terminal-tab-types'
 import { omitRecordKeys } from '../worktrees/teardown/record-key-omission'
 import { getTerminalActivationSpawnSuppression } from '../terminal-activation-spawn-suppression'
+import { collapseGroupLayout } from '../../../../../shared/workspace-layout/tab-group-layout-tree'
 import {
   createKeptWorktreeSurfacePruners,
   type KeptWorktreeSurfaceRemoval
@@ -34,6 +35,52 @@ type WorktreeLayoutPatch = Pick<
 >
 
 /**
+ * Splits a kept workspace's purge emptied, collapsed the way closing their last tab collapses
+ * them, so the surviving twin's group takes the space and the selection.
+ */
+function collapseEmptiedKeptGroups(
+  s: Pick<AppState, 'groupsByWorktree' | 'layoutByWorktree' | 'activeGroupIdByWorktree'>,
+  groupsByWorktree: AppState['groupsByWorktree'],
+  worktreeIds: ReadonlySet<string>
+): {
+  groups: AppState['groupsByWorktree']
+  layout: AppState['layoutByWorktree']
+  activeGroups: AppState['activeGroupIdByWorktree']
+} {
+  let groupsOut = groupsByWorktree
+  let layoutOut = s.layoutByWorktree
+  let activeOut = s.activeGroupIdByWorktree
+  for (const worktreeId of worktreeIds) {
+    const before = s.groupsByWorktree[worktreeId] ?? []
+    let groups = groupsOut[worktreeId] ?? []
+    const emptied = groups.filter(
+      (group) =>
+        group.tabOrder.length === 0 &&
+        (before.find((prior) => prior.id === group.id)?.tabOrder.length ?? 0) > 0
+    )
+    for (const group of emptied) {
+      if (groups.length <= 1 || !layoutOut[worktreeId]) {
+        break
+      }
+      groups = groups.filter((candidate) => candidate.id !== group.id)
+      const collapsed = collapseGroupLayout(
+        layoutOut,
+        activeOut,
+        worktreeId,
+        group.id,
+        groups[0]?.id ?? null
+      )
+      layoutOut = collapsed.layoutByWorktree
+      activeOut = collapsed.activeGroupIdByWorktree
+    }
+    if (groups !== (groupsOut[worktreeId] ?? [])) {
+      groupsOut = { ...groupsOut, [worktreeId]: groups }
+    }
+  }
+  return { groups: groupsOut, layout: layoutOut, activeGroups: activeOut }
+}
+
+/**
  * Drops removed worktrees' tabs, groups and pane layouts, and clears selection that pointed into
  * them. `kept` names surfaces leaving workspaces that stay, whose entries are pruned instead.
  */
@@ -53,6 +100,13 @@ export function removeWorktreeLayout(
   const kept = removed.kept ? createKeptWorktreeSurfacePruners(s, removed.kept) : null
   const keep = <T>(value: T, prune: ((value: T) => T) | undefined): T =>
     prune ? prune(value) : value
+  const groupLayout = removed.kept
+    ? collapseEmptiedKeptGroups(
+        s,
+        keep(omitByWorktree(s.groupsByWorktree), kept?.groups),
+        removed.kept.worktreeIds
+      )
+    : null
   const remainingFiles = s.openFiles.some((f) => worktreeIds.has(f.worktreeId))
     ? s.openFiles.filter((f) => !worktreeIds.has(f.worktreeId))
     : s.openFiles
@@ -62,9 +116,9 @@ export function removeWorktreeLayout(
     ptyIdsByTabId: omitByTabId(s.ptyIdsByTabId),
     // Why: split-tab layout/group state is worktree-owned; leaving it makes a deleted worktree look restorable.
     unifiedTabsByWorktree: keep(omitByWorktree(s.unifiedTabsByWorktree), kept?.unifiedTabs),
-    groupsByWorktree: keep(omitByWorktree(s.groupsByWorktree), kept?.groups),
-    layoutByWorktree: omitByWorktree(s.layoutByWorktree),
-    activeGroupIdByWorktree: omitByWorktree(s.activeGroupIdByWorktree),
+    groupsByWorktree: groupLayout?.groups ?? omitByWorktree(s.groupsByWorktree),
+    layoutByWorktree: omitByWorktree(groupLayout?.layout ?? s.layoutByWorktree),
+    activeGroupIdByWorktree: omitByWorktree(groupLayout?.activeGroups ?? s.activeGroupIdByWorktree),
     // Why: the tab strip persists visual order per worktree; drop the entry so stale tab IDs aren't retained.
     tabBarOrderByWorktree: keep(omitByWorktree(s.tabBarOrderByWorktree), kept?.tabBarOrder),
     browserTabsByWorktree: keep(omitByWorktree(s.browserTabsByWorktree), kept?.browserTabs),

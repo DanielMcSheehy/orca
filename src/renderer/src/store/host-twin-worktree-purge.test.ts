@@ -111,6 +111,49 @@ describe('purgeWorktreeTerminalState with a surviving twin', () => {
     expect(s.pendingCodexPaneRestartIds).toEqual({ [shared]: true })
   })
 
+  it('collapses a split the purged copy emptied, handing selection to the survivor', () => {
+    const f = twin()
+    const key = f.workspaceKey
+    f.store.setState((s) => {
+      const [group] = s.groupsByWorktree[key] ?? []
+      if (!group) {
+        throw new Error('fixture has no tab group')
+      }
+      const remoteIds = [f.remote.terminalTabId, f.remote.fileId]
+      return {
+        groupsByWorktree: {
+          [key]: [
+            { ...group, tabOrder: group.tabOrder.filter((id) => !remoteIds.includes(id)) },
+            { ...group, id: 'remote-group', tabOrder: remoteIds, activeTabId: remoteIds[0] }
+          ]
+        },
+        unifiedTabsByWorktree: {
+          [key]: (s.unifiedTabsByWorktree[key] ?? []).map((tab) =>
+            remoteIds.includes(tab.id) ? { ...tab, groupId: 'remote-group' } : tab
+          )
+        },
+        layoutByWorktree: {
+          [key]: {
+            type: 'split',
+            direction: 'horizontal',
+            first: { type: 'leaf', groupId: group.id },
+            second: { type: 'leaf', groupId: 'remote-group' }
+          }
+        },
+        activeGroupIdByWorktree: { [key]: 'remote-group' }
+      }
+    })
+
+    f.store.getState().purgeWorktreeTerminalState([hostWorktreeTarget({ id: key, ...f.remote })])
+
+    const s = f.store.getState()
+    const survivingGroupIds = (s.groupsByWorktree[key] ?? []).map((group) => group.id)
+    expect(survivingGroupIds).not.toContain('remote-group')
+    expect(survivingGroupIds).toHaveLength(1)
+    expect(s.layoutByWorktree[key]).not.toEqual(expect.objectContaining({ type: 'split' }))
+    expect(s.activeGroupIdByWorktree[key]).toBe(survivingGroupIds[0])
+  })
+
   it('keeps the runtime twin when the local copy is purged', () => {
     const f = twin('local+runtime')
     const key = f.workspaceKey
