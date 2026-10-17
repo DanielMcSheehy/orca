@@ -3,7 +3,11 @@ import { hostWorktreeTarget } from '../../../shared/worktree/host-qualified-iden
 import { getWorktreeVisitKey } from '@/lib/worktree-visit-recency'
 import { hasWorktreeSleepIntent } from '@/lib/worktree-sleep-intent'
 import { resetHostTwinModuleStores } from './host-twin-state-projection.test-fixture'
-import { createHostTwinFixture, type HostTwinFixture } from './host-twin.test-fixture'
+import {
+  createHostTwinFixture,
+  TWIN_RUNTIME_ENV,
+  type HostTwinFixture
+} from './host-twin.test-fixture'
 
 vi.mock('sonner', () => ({
   toast: { info: vi.fn(), success: vi.fn(), error: vi.fn(), warning: vi.fn() }
@@ -186,5 +190,31 @@ describe('purgeWorktreeTerminalState with a surviving twin', () => {
     expect(s.groupsByWorktree[key]?.[0]?.activeTabId).toBe(f.local.fileId)
     expect(s.activeTabType).toBe('editor')
     expect(s.activeFileId).toBe(f.local.fileId)
+  })
+
+  it("attributes a paired runtime's purge to the SSH copy it reaches", () => {
+    const f = twin()
+    const key = f.workspaceKey
+    f.store.setState((s) => ({
+      worktreesByRepo: {
+        [f.projectId]: (s.worktreesByRepo[f.projectId] ?? []).map((row) =>
+          row.hostId === f.remote.hostId
+            ? { ...row, runtimeOwnerEnvironmentId: TWIN_RUNTIME_ENV }
+            : row
+        )
+      }
+    }))
+
+    f.store
+      .getState()
+      .purgeWorktreeTerminalState([
+        hostWorktreeTarget({ id: key, hostId: `runtime:${TWIN_RUNTIME_ENV}` })
+      ])
+
+    expect(f.store.getState().tabsByWorktree[key]?.map((tab) => tab.id)).toEqual([
+      f.local.terminalTabId,
+      f.dormantTabId
+    ])
+    expect(f.store.getState().openFiles.map((file) => file.id)).toEqual([f.local.fileId])
   })
 })

@@ -18,6 +18,7 @@ import {
 } from './purged-structured-launch-retirement'
 import { buildWorktreePurgeSurfacePatch } from './worktree-purge-surface-patch'
 import { buildHostTwinPurgeState, collectHostTwinPurgeScopes } from './host-twin-worktree-purge'
+import { composeWorktreeHostIdentity } from '../../../../../../shared/worktree/host-qualified-identity'
 
 /**
  * Builds a bulk cleanup patch and clears auxiliary warning records without requiring individual
@@ -30,14 +31,16 @@ export function buildWorktreePurgeState(
 ): Partial<AppState> {
   const targets = worktreeTargets.map(normalizeWorktreePurgeTarget)
   const twinScopes = collectHostTwinPurgeScopes(s, targets)
-  if (twinScopes.size === 0) {
+  if (twinScopes.byHost.size === 0) {
     return buildFullWorktreePurgeState(s, targets)
   }
   const fullTargets = targets.filter(
-    (target) => !target.hostId || !twinScopes.get(target.hostId)?.has(target.id)
+    (target) =>
+      !target.hostId ||
+      !twinScopes.twinTargetKeys.has(composeWorktreeHostIdentity(target.hostId, target.id))
   )
   let patch = fullTargets.length > 0 ? buildFullWorktreePurgeState(s, fullTargets) : {}
-  for (const [hostId, twinHostIds] of twinScopes) {
+  for (const [hostId, twinHostIds] of twinScopes.byHost) {
     patch = { ...patch, ...buildHostTwinPurgeState({ ...s, ...patch }, hostId, twinHostIds) }
   }
   return patch

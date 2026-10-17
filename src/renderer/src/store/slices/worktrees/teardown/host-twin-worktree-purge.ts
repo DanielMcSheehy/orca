@@ -7,7 +7,10 @@ import {
 } from '../../../../../../shared/execution-host'
 import { parseWorkspaceKey } from '../../../../../../shared/workspace-scope'
 import { getRepoIdFromWorktreeId } from '../../../../../../shared/worktree/id'
-import { composeWorktreeHostIdentity } from '../../../../../../shared/worktree/host-qualified-identity'
+import {
+  composeWorktreeHostIdentity,
+  type HostScopedWorktreeKey
+} from '../../../../../../shared/worktree/host-qualified-identity'
 import type { WorktreePurgeTarget } from '../../worktree-purge-target'
 import { getFolderWorkspaceHostId } from '../../../folder-workspaces/folder-workspace-catalog'
 import {
@@ -29,52 +32,76 @@ import {
 } from './purged-structured-launch-retirement'
 import { buildWorktreePurgeSurfacePatch } from './worktree-purge-surface-patch'
 
-/** Hosts outside the purge that still publish this workspace id, by the listing's host matching. */
-function getSurvivingPublisherHostIds(
+type PublisherRow = {
+  id: string
+  hostId?: ExecutionHostId
+  runtimeOwnerEnvironmentId?: string
+}
+
+/**
+ * For one targeted id: hosts outside the purge that still publish it, and the host each purged
+ * target's state is attributed to. Rows match by the listing's host matching, so an unstamped
+ * legacy row or a paired runtime's SSH row counts as the purged copy, not a twin.
+ */
+function resolvePurgedPublishers(
   s: AppState,
   workspaceId: string,
   purgedHosts: ReadonlySet<ExecutionHostId>
-): ExecutionHostId[] {
+): { survivors: ExecutionHostId[]; attributedHostIds: Map<ExecutionHostId, ExecutionHostId> } {
   const scope = parseWorkspaceKey(workspaceId)
+  const attributedHostIds = new Map([...purgedHosts].map((hostId) => [hostId, hostId]))
   if (scope?.type === 'folder') {
     const hosts = (s.folderWorkspaces ?? [])
       .filter((folder) => folder.id === scope.folderWorkspaceId)
       .map((folder) => getFolderWorkspaceHostId(folder, s.projectGroups ?? []))
-    return [...new Set(hosts)].filter((hostId) => !purgedHosts.has(hostId))
+    return {
+      survivors: [...new Set(hosts)].filter((hostId) => !purgedHosts.has(hostId)),
+      attributedHostIds
+    }
   }
   const worktreeId = scope?.type === 'worktree' ? scope.worktreeId : workspaceId
   const repoId = getRepoIdFromWorktreeId(worktreeId)
-  const matchOptions = new Map(
-    [...purgedHosts].map((hostId) => [hostId, worktreeHostMatchOptions(s, repoId, hostId)])
-  )
-  // Why host matching: an unstamped legacy row or a paired runtime's SSH row is the purged copy.
-  const survivors = [
+  const rows: PublisherRow[] = [
     ...(s.worktreesByRepo[repoId] ?? []),
     ...(s.detectedWorktreesByRepo[repoId]?.worktrees ?? [])
-  ]
-    .filter(
-      (row) =>
-        row.id === worktreeId &&
-        ![...matchOptions].some(([hostId, options]) => worktreeMatchesHost(row, hostId, options))
+  ].filter((row) => row.id === worktreeId)
+  const survivors = new Set<ExecutionHostId>()
+  for (const row of rows) {
+    const purgedHost = [...purgedHosts].find((hostId) =>
+      worktreeMatchesHost(row, hostId, worktreeHostMatchOptions(s, repoId, hostId))
     )
-    .map(
-      (row) =>
-        row.hostId ??
+    if (purgedHost) {
+      // Why: a copy reached through a paired runtime stamps its tabs with its own SSH host.
+      if (row.hostId && !purgedHosts.has(row.hostId)) {
+        attributedHostIds.set(purgedHost, row.hostId)
+      }
+      continue
+    }
+    survivors.add(
+      row.hostId ??
         (row.runtimeOwnerEnvironmentId
           ? toRuntimeExecutionHostId(row.runtimeOwnerEnvironmentId)
           : LOCAL_EXECUTION_HOST_ID)
     )
-  return [...new Set(survivors)].filter((hostId) => !purgedHosts.has(hostId))
+  }
+  return {
+    survivors: [...survivors].filter((hostId) => !purgedHosts.has(hostId)),
+    attributedHostIds
+  }
 }
 
-/**
- * Per purged host, its target ids that a host outside the purge still publishes, with those
- * hosts. A raw-id target for the same id wins: it already purges every bucket.
- */
+export type HostTwinPurgeScopes = {
+  /** Host identities of every host target whose id a twin still publishes. */
+  twinTargetKeys: Set<HostScopedWorktreeKey>
+  /** Per attributed host, its twin ids with the hosts that still publish them. */
+  byHost: Map<ExecutionHostId, Map<string, ExecutionHostId[]>>
+}
+
+/** Host targets whose id a host outside the purge still publishes. A raw id for the same id wins. */
 export function collectHostTwinPurgeScopes(
   s: AppState,
   targets: readonly WorktreePurgeTarget[]
-): Map<ExecutionHostId, Map<string, ExecutionHostId[]>> {
+): HostTwinPurgeScopes {
   const rawIds = new Set(targets.filter((target) => !target.hostId).map((target) => target.id))
   const purgedHostsById = new Map<string, Set<ExecutionHostId>>()
   for (const { id, hostId } of targets) {
@@ -82,15 +109,17 @@ export function collectHostTwinPurgeScopes(
       purgedHostsById.set(id, (purgedHostsById.get(id) ?? new Set()).add(hostId))
     }
   }
-  const scopes = new Map<ExecutionHostId, Map<string, ExecutionHostId[]>>()
+  const scopes: HostTwinPurgeScopes = { twinTargetKeys: new Set(), byHost: new Map() }
   for (const [id, purgedHosts] of purgedHostsById) {
-    const survivors = getSurvivingPublisherHostIds(s, id, purgedHosts)
+    const { survivors, attributedHostIds } = resolvePurgedPublishers(s, id, purgedHosts)
     if (survivors.length === 0) {
       continue
     }
     for (const hostId of purgedHosts) {
-      const scope = scopes.get(hostId) ?? new Map<string, ExecutionHostId[]>()
-      scopes.set(hostId, scope.set(id, survivors))
+      scopes.twinTargetKeys.add(composeWorktreeHostIdentity(hostId, id))
+      const attributedHostId = attributedHostIds.get(hostId) ?? hostId
+      const scope = scopes.byHost.get(attributedHostId) ?? new Map<string, ExecutionHostId[]>()
+      scopes.byHost.set(attributedHostId, scope.set(id, survivors))
     }
   }
   return scopes
